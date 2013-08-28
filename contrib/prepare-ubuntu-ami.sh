@@ -14,6 +14,7 @@
 #   6. Distribute the AMI to other regions using `ec2-copy-image`
 #   7. Create/update your Deis flavors to use your new AMIs
 #
+apt-get install python-software-properties -y
 
 # add docker ppa
 apt-add-repository ppa:dotcloud/lxc-docker -y
@@ -28,7 +29,7 @@ apt-get install lxc-docker curl git python-setuptools python-pip -yq
 # create buildstep docker image
 git clone https://github.com/opdemand/buildstep.git
 cd buildstep
-./build.sh ./stack deis/buildstep
+make build
 cd ..
 rm -rf buildstep
 
@@ -46,7 +47,7 @@ rm -rf /var/lib/cloud
 
 # purge SSH authorized keys
 rm -f /home/ubuntu/.ssh/authorized_keys
-rm -f /root/.ssh/authorized_keys
+# rm -f /root/.ssh/authorized_keys
 
 # ssh host keys are automatically regenerated
 # on system boot by ubuntu cloud init
