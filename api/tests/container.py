@@ -50,13 +50,13 @@ class ContainerTest(TestCase):
         # create & scale a basic formation
         formation_id = 'autotest'
         url = '/api/formations/{formation_id}/layers'.format(**locals())
-        body = {'id': 'proxy', 'flavor': 'autotest', 'type': 'proxy',
+        body = {'id': 'proxy', 'flavor': 'autotest', 'proxy': True,
                 'run_list': 'recipe[deis::proxy]'}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
         url = '/api/formations/{formation_id}/layers'.format(**locals())
-        body = {'id': 'runtime', 'flavor': 'autotest', 'type': 'runtime',
-                'run_list': 'recipe[deis::proxy]'}
+        body = {'id': 'runtime', 'flavor': 'autotest', 'runtime': True,
+                'run_list': 'recipe[deis::runtime]'}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
         url = '/api/formations/{formation_id}/scale'.format(**locals())
@@ -67,6 +67,70 @@ class ContainerTest(TestCase):
     def test_container_scale(self):
         url = '/api/apps'
         body = {'formation': 'autotest'}
+        response = self.client.post(url, json.dumps(body), content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+        app_id = response.data['id']
+        # should start with zero
+        url = "/api/apps/{app_id}/containers".format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 0)
+        # scale up
+        url = "/api/apps/{app_id}/scale".format(**locals())
+        body = {'web': 4, 'worker': 2}
+        response = self.client.post(url, json.dumps(body), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        url = "/api/apps/{app_id}/containers".format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 6)
+        url = "/api/apps/{app_id}".format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['containers'], json.dumps(body))
+        # scale down
+        url = "/api/apps/{app_id}/scale".format(**locals())
+        body = {'web': 2, 'worker': 1}
+        response = self.client.post(url, json.dumps(body), content_type='application/json')
+        url = "/api/apps/{app_id}/containers".format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 3)
+        url = "/api/apps/{app_id}".format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['containers'], json.dumps(body))
+        # scale down to 0
+        url = "/api/apps/{app_id}/scale".format(**locals())
+        body = {'web': 0, 'worker': 0}
+        response = self.client.post(url, json.dumps(body), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        url = "/api/apps/{app_id}/containers".format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 0)
+        url = "/api/apps/{app_id}".format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['containers'], json.dumps(body))
+
+    def test_container_scale_single_layer(self):
+        # create & scale a single layer formation
+        response = self.client.post('/api/formations', json.dumps({'id': 'single-layer'}),
+                                    content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+        formation_id = 'single-layer'
+        url = '/api/formations/{formation_id}/layers'.format(**locals())
+        body = {'id': 'default', 'flavor': 'autotest', 'proxy': True, 'runtime': True,
+                'run_list': 'recipe[deis::runtime],recipe[deis::proxy]'}
+        response = self.client.post(url, json.dumps(body), content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+        url = '/api/formations/{formation_id}/scale'.format(**locals())
+        body = {'default': 4}
+        response = self.client.post(url, json.dumps(body), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        url = '/api/apps'
+        body = {'formation': 'single-layer'}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
         app_id = response.data['id']

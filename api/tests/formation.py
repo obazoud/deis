@@ -70,21 +70,6 @@ class FormationTest(TestCase):
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
         formation_id = response.data['id']  # noqa
-        # create & scale a basic formation
-        url = '/api/formations/{formation_id}/layers'.format(**locals())
-        body = {'id': 'proxy', 'flavor': 'autotest', 'type': 'proxy',
-                'run_list': 'recipe[deis::proxy]'}
-        response = self.client.post(url, json.dumps(body), content_type='application/json')
-        self.assertEqual(response.status_code, 201)
-        url = '/api/formations/{formation_id}/layers'.format(**locals())
-        body = {'id': 'runtime', 'flavor': 'autotest', 'type': 'runtime',
-                'run_list': 'recipe[deis::proxy]'}
-        response = self.client.post(url, json.dumps(body), content_type='application/json')
-        self.assertEqual(response.status_code, 201)
-        url = '/api/formations/{formation_id}/scale'.format(**locals())
-        body = {'proxy': 2, 'runtime': 4}
-        response = self.client.post(url, json.dumps(body), content_type='application/json')
-        self.assertEqual(response.status_code, 200)
         # test calculate
         url = '/api/formations/{formation_id}/calculate'.format(**locals())
         response = self.client.post(url)

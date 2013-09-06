@@ -73,11 +73,13 @@ class NodeTest(TestCase):
         self.assertEqual(response.status_code, 201)
         formation_id = response.data['id']  # noqa
         url = '/api/formations/{formation_id}/layers'.format(**locals())
-        body = {'id': 'proxy', 'flavor': 'autotest', 'run_list': 'recipe[deis::proxy]'}
+        body = {'id': 'proxy', 'flavor': 'autotest', 'run_list': 'recipe[deis::proxy]',
+                'runtime': False, 'proxy': True}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
         url = '/api/formations/{formation_id}/layers'.format(**locals())
-        body = {'id': 'runtime', 'flavor': 'autotest', 'run_list': 'recipe[deis::runtime]'}
+        body = {'id': 'runtime', 'flavor': 'autotest', 'run_list': 'recipe[deis::runtime]',
+                'runtime': True, 'proxy': False}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
         url = '/api/formations/{formation_id}/layers'.format(**locals())

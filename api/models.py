@@ -245,9 +245,11 @@ class FormationManager(models.Manager):
 
     def next_container_node(self, formation, container_type, reverse=False):
         count = []
-        layer = formation.layer_set.get(id='runtime')
-        runtime_nodes = list(Node.objects.filter(
-            formation=formation, layer=layer).order_by('created'))
+        layers = formation.layer_set.filter(runtime=True)
+        runtime_nodes = []
+        for l in layers:
+            runtime_nodes.extend(Node.objects.filter(
+                formation=formation, layer=l).order_by('created'))
         container_map = {n: [] for n in runtime_nodes}
         containers = list(Container.objects.filter(
             formation=formation, type=container_type).order_by('created'))
@@ -361,7 +363,9 @@ class Layer(UuidAuditedModel):
 
     formation = models.ForeignKey('Formation')
     flavor = models.ForeignKey('Flavor')
-    level = models.PositiveIntegerField(default=0)
+
+    proxy = models.BooleanField(default=False)
+    runtime = models.BooleanField(default=False)
 
     # chef settings
     chef_version = models.CharField(max_length=32, default='11.4.4')
@@ -600,7 +604,7 @@ class App(UuidAuditedModel):
 
     def run(self, commands):
         """Run a one-off command in an ephemeral app container."""
-        runtime_nodes = self.formation.node_set.filter(layer__id='runtime').order_by('?')
+        runtime_nodes = self.formation.node_set.filter(layer__runtime=True).order_by('?')
         if not runtime_nodes:
             raise EnvironmentError('No nodes available')
         return runtime_nodes[0].run(self, commands)
@@ -634,12 +638,6 @@ class ContainerManager(models.Manager):
         """Scale containers up or down to match requested."""
         requested_containers = structure.copy()
         formation = app.formation
-#         runtime_layers = formation.layer_set.filter(id='runtime')
-#         if len(runtime_layers) < 1:
-#             raise ScalingError('Must create a "runtime" layer to host containers')
-#         runtime_nodes = runtime_layers[0].node_set.all()
-#         if len(runtime_nodes) < 1:
-#             raise ScalingError('Must scale runtime nodes > 0 to host containers')
         # increment new container nums off the most recent container
         all_containers = app.container_set.all().order_by('-created')
         container_num = 1 if not all_containers else all_containers[0].num + 1
@@ -683,7 +681,7 @@ class ContainerManager(models.Manager):
 #         return databag
 
     def balance(self, formation, **kwargs):
-        runtime_nodes = formation.node_set.filter(layer__id='runtime').order_by('created')
+        runtime_nodes = formation.node_set.filter(layer__runtime=True).order_by('created')
         all_containers = self.filter(formation=formation).order_by('-created')
         # get the next container number (e.g. web.19)
         container_num = 1 if not all_containers else all_containers[0].num + 1
@@ -835,7 +833,7 @@ class Build(UuidAuditedModel):
                             formation=formation,
                             user=user)
         # see if we need to scale an initial web container
-        if len(formation.node_set.filter(layer__id='runtime')) > 0 and \
+        if len(formation.node_set.filter(layer__runtime=True)) > 0 and \
            len(formation.container_set.filter(type='web')) < 1:
             # scale an initial web containers
             formation.containers['web'] = 1

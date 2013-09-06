@@ -51,6 +51,8 @@ class LayerTest(TestCase):
         self.assertIn('id', response.data)
         self.assertIn('flavor', response.data)
         self.assertIn('run_list', response.data)
+        self.assertIn('proxy', response.data)
+        self.assertIn('runtime', response.data)
         url = '/api/formations/{formation_id}/layers'.format(**locals())
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
