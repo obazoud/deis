@@ -42,6 +42,28 @@ def update_formation(formation_id, databag_item_value):
         raise RuntimeError(msg.format(**locals()))
 
 
+@task(name='controller.update_application')
+def update_application(app_id, databag_item_value):
+    # update the data bag
+    client = ChefAPI(settings.CHEF_SERVER_URL,
+                     settings.CHEF_CLIENT_NAME,
+                     settings.CHEF_CLIENT_KEY)
+    # TODO: move this logic into the chef API
+    resp, code = client.update_databag_item(
+        'deis-apps', app_id, databag_item_value)
+    if code == 200:
+        return resp, code
+    elif code == 404:
+        resp, code = client.create_databag_item(
+            'deis-apps', app_id, databag_item_value)
+        if code != 201:
+            msg = 'Failed to create data bag: {code} => {resp}'
+            raise RuntimeError(msg.format(**locals()))
+    else:
+        msg = 'Failed to update data bag: {code} => {resp}'
+        raise RuntimeError(msg.format(**locals()))
+
+
 @task(name='controller.destroy_formation')
 def destroy_formation(formation_id):
     client = ChefAPI(settings.CHEF_SERVER_URL,

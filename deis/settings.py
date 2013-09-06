@@ -149,7 +149,7 @@ INSTALLED_APPS = (
     'djcelery',
     'json_field',
     'rest_framework',
-    'south',
+    # 'south',
     # Deis apps
     'api',
     'celerytasks',

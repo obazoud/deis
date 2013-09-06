@@ -269,177 +269,33 @@ class FormationManager(models.Manager):
 class Formation(UuidAuditedModel):
 
     """
-    Formation of machine instances, list of nodes available
-    as `formation.nodes`
+    Formation of nodes used to host applications
     """
     objects = FormationManager()
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL)
     id = models.SlugField(max_length=64)
-    layers = fields.JSONField(default='{}', blank=True)
-    containers = fields.JSONField(default='{}', blank=True)
+    nodes = fields.JSONField(default='{}', blank=True)
 
     class Meta:
         unique_together = (('owner', 'id'),)
-
-    def scale_layers(self, **kwargs):
-        """Scale layers up or down to match requested."""
-        layers = self.layers.copy()
-        funcs = []
-        new_nodes = False
-        for layer_id, requested in layers.items():
-            layer = self.layer_set.get(id=layer_id)
-            nodes = list(layer.node_set.all().order_by('created'))
-            diff = requested - len(nodes)
-            if diff == 0:
-                continue
-            while diff < 0:
-                node = nodes.pop(0)
-                funcs.append(node.terminate)
-                diff = requested - len(nodes)
-            while diff > 0:
-                node = Node.objects.new(self, layer)
-                nodes.append(node)
-                funcs.append(node.launch)
-                diff = requested - len(nodes)
-                new_nodes = True
-        # http://docs.celeryproject.org/en/latest/userguide/canvas.html#groups
-        job = [func() for func in funcs]
-        # launch/terminate nodes in parallel
-        if job:
-            group(*job).apply_async().join()
-        # scale containers in case nodes have been destroyed
-        runtime_layers = self.layer_set.filter(id='runtime')
-        if runtime_layers.exists() and runtime_layers[0].node_set.count():
-            self.scale_containers()
-        # balance containers
-        containers_balanced = self._balance_containers()
-        # once nodes are in place, recalculate the formation and update the data bag
-        databag = self.calculate()
-        # force-converge nodes if there were new nodes or container rebalancing
-        if new_nodes or containers_balanced:
-            self.converge(databag)
-        # save the formation with updated layers
-        self.save()
-        return databag
-
-    def scale_containers(self, **kwargs):
-        """Scale containers up or down to match requested."""
-        requested_containers = self.containers.copy()
-        runtime_layers = self.layer_set.filter(id='runtime')
-        if len(runtime_layers) < 1:
-            raise ScalingError('Must create a "runtime" layer to host containers')
-        runtime_nodes = runtime_layers[0].node_set.all()
-        if len(runtime_nodes) < 1:
-            raise ScalingError('Must scale runtime nodes > 0 to host containers')
-        # increment new container nums off the most recent container
-        all_containers = self.container_set.all().order_by('-created')
-        container_num = 1 if not all_containers else all_containers[0].num + 1
-        # iterate and scale by container type (web, worker, etc)
-        changed = False
-        for container_type in requested_containers.keys():
-            containers = list(self.container_set.filter(type=container_type).order_by('created'))
-            requested = requested_containers.pop(container_type)
-            diff = requested - len(containers)
-            if diff == 0:
-                continue
-            changed = True
-            while diff < 0:
-                # get the next node with the most containers
-                node = Formation.objects.next_container_node(self, container_type, reverse=True)
-                # delete a container attached to that node
-                for c in containers:
-                    if node == c.node:
-                        containers.remove(c)
-                        c.delete()
-                        diff += 1
-                        break
-            while diff > 0:
-                # get the next node with the fewest containers
-                node = Formation.objects.next_container_node(self, container_type)
-                c = Container.objects.create(owner=self.owner,
-                                             formation=self,
-                                             type=container_type,
-                                             num=container_num,
-                                             node=node)
-                containers.append(c)
-                container_num += 1
-                diff -= 1
-        # once nodes are in place, recalculate the formation and update the data bag
-        databag = self.calculate()
-        if changed is True:
-            self.converge(databag)
-        # save the formation with updated containers
-        self.save()
-        return databag
-
-    def balance(self, **kwargs):
-        changed = self._balance_containers()
-        databag = self.calculate()
-        if changed:
-            self.converge(databag)
-        return databag
-
-    def _balance_containers(self, **kwargs):
-        runtime_nodes = self.node_set.filter(layer__id='runtime').order_by('created')
-        if len(runtime_nodes) < 2:
-            return  # there's nothing to balance with 1 runtime node
-        all_containers = Container.objects.filter(formation=self).order_by('-created')
-        # get the next container number (e.g. web.19)
-        container_num = 1 if not all_containers else all_containers[0].num + 1
-        changed = False
-        # iterate by unique container type
-        for container_type in set([c.type for c in all_containers]):
-            # map node container counts => { 2: [b3, b4], 3: [ b1, b2 ] }
-            n_map = {}
-            for node in runtime_nodes:
-                ct = len(node.container_set.filter(type=container_type))
-                n_map.setdefault(ct, []).append(node)
-            # loop until diff between min and max is 1 or 0
-            while max(n_map.keys()) - min(n_map.keys()) > 1:
-                # get the most over-utilized node
-                n_max = max(n_map.keys())
-                n_over = n_map[n_max].pop(0)
-                if len(n_map[n_max]) == 0:
-                    del n_map[n_max]
-                # get the most under-utilized node
-                n_min = min(n_map.keys())
-                n_under = n_map[n_min].pop(0)
-                if len(n_map[n_min]) == 0:
-                    del n_map[n_min]
-                # create a container on the most under-utilized node
-                Container.objects.create(owner=self.owner,
-                                         formation=self,
-                                         type=container_type,
-                                         num=container_num,
-                                         node=n_under)
-                container_num += 1
-                # delete the oldest container from the most over-utilized node
-                c = n_over.container_set.filter(type=container_type).order_by('created')[0]
-                c.delete()
-                # update the n_map accordingly
-                for n in (n_over, n_under):
-                    ct = len(n.container_set.filter(type=container_type))
-                    n_map.setdefault(ct, []).append(n)
-                changed = True
-        return changed
 
     def __str__(self):
         return self.id
 
     def calculate(self):
         """Return a Chef data bag item for this formation"""
-        release = self.release_set.all().order_by('-created')[0]
         d = {}
         d['id'] = self.id
+#         release = self.release_set.all().order_by('-created')[0]
         d['release'] = {}
-        d['release']['version'] = release.version
-        d['release']['config'] = release.config.values
-        d['release']['image'] = release.image
-        d['release']['build'] = {}
-        if release.build:
-            d['release']['build']['url'] = release.build.url
-            d['release']['build']['procfile'] = release.build.procfile
+#         d['release']['version'] = release.version
+#         d['release']['config'] = release.config.values
+#         d['release']['image'] = release.image
+#         d['release']['build'] = {}
+#         if release.build:
+#             d['release']['build']['url'] = release.build.url
+#             d['release']['build']['procfile'] = release.build.procfile
         # calculate proxy
         d['proxy'] = {}
         d['proxy']['algorithm'] = 'round_robin'
@@ -474,21 +330,6 @@ class Formation(UuidAuditedModel):
         job = group(*[n.converge() for n in nodes])
         job.apply_async().join()
         return databag
-
-    def logs(self):
-        """Return aggregated log data for this formation."""
-        path = os.path.join(settings.DEIS_LOG_DIR, self.id + '.log')
-        if not os.path.exists(path):
-            raise EnvironmentError('Could not locate logs')
-        data = subprocess.check_output(['tail', '-n', str(settings.LOG_LINES), path])
-        return data
-
-    def run(self, commands):
-        """Run a one-off command in an ephemeral container."""
-        runtime_nodes = self.node_set.filter(layer__id='runtime').order_by('?')
-        if not runtime_nodes:
-            raise EnvironmentError('No nodes available')
-        return runtime_nodes[0].run(commands)
 
     def destroy(self):
         """Create subtasks to terminate all nodes in parallel."""
@@ -575,6 +416,46 @@ class NodeManager(models.Manager):
                            num=next_num,
                            id="{0}-{1}-{2}".format(formation.id, layer.id, next_num))
         return node
+
+    def scale(self, formation, structure, **kwargs):
+        """Scale layers up or down to match requested."""
+        funcs = []
+        changed = False
+        for layer_id, requested in structure.items():
+            layer = formation.layer_set.get(id=layer_id)
+            nodes = list(layer.node_set.all().order_by('created'))
+            diff = requested - len(nodes)
+            if diff == 0:
+                continue
+            while diff < 0:
+                node = nodes.pop(0)
+                funcs.append(node.terminate)
+                diff = requested - len(nodes)
+                changed = True
+            while diff > 0:
+                node = self.new(formation, layer)
+                nodes.append(node)
+                funcs.append(node.launch)
+                diff = requested - len(nodes)
+                changed = True
+        # http://docs.celeryproject.org/en/latest/userguide/canvas.html#groups
+        job = [func() for func in funcs]
+        # launch/terminate nodes in parallel
+        if job:
+            group(*job).apply_async().join()
+        # always scale and balance every application
+        if nodes:
+            for app in formation.app_set.all():
+                Container.objects.scale(app, app.containers)
+                Container.objects.balance(formation)
+        # once nodes are in place, recalculate the formation and update the data bag
+        databag = formation.calculate()
+        # force-converge nodes if there were new nodes or container rebalancing
+        if changed:
+            formation.converge(databag)
+        # save the formation with updated layers
+        formation.save()
+        return databag
 
 
 @python_2_unicode_compatible
@@ -668,16 +549,16 @@ class Node(UuidAuditedModel):
         args = (self.uuid, creds, params, self.provider_id)
         return args
 
-    def run(self, *args, **kwargs):
+    def run(self, app, *args, **kwargs):
         tasks = import_tasks(self.layer.flavor.provider.type)
         command = ' '.join(*args)
         # prepare app-specific docker arguments
-        formation_id = self.formation.id
-        release = self.formation.release_set.order_by('-created')[0]
+        app_id = app.id
+        release = app.release_set.order_by('-created')[0]
         version = release.version
         docker_args = ' '.join(
             ['-v',
-             '/opt/deis/runtime/slugs/{formation_id}-{version}/app:/app'.format(**locals()),
+             '/opt/deis/runtime/slugs/{app_id}-{version}/app:/app'.format(**locals()),
              release.image])
         base_cmd = "export HOME=/app; cd /app && for profile in " \
                    "`find /app/.profile.d/*.sh -type f`; do . $profile; done"
@@ -694,15 +575,171 @@ class Node(UuidAuditedModel):
 
 
 @python_2_unicode_compatible
+class App(UuidAuditedModel):
+
+    """
+    Application used to service requests on behalf of end-users
+    """
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL)
+    id = models.SlugField(max_length=64, unique=True)
+    formation = models.ForeignKey('Formation')
+
+    containers = fields.JSONField(default='{}', blank=True)
+
+    def __str__(self):
+        return self.id
+
+    def logs(self):
+        """Return aggregated log data for this application."""
+        path = os.path.join(settings.DEIS_LOG_DIR, self.id + '.log')
+        if not os.path.exists(path):
+            raise EnvironmentError('Could not locate logs')
+        data = subprocess.check_output(['tail', '-n', str(settings.LOG_LINES), path])
+        return data
+
+    def run(self, commands):
+        """Run a one-off command in an ephemeral app container."""
+        runtime_nodes = self.formation.node_set.filter(layer__id='runtime').order_by('?')
+        if not runtime_nodes:
+            raise EnvironmentError('No nodes available')
+        return runtime_nodes[0].run(self, commands)
+
+    def calculate(self):
+        """Calculate and update the application databag"""
+        d = {}
+        d['id'] = self.id
+        release = self.release_set.all().order_by('-created')[0]
+        d['release'] = {}
+        d['release']['version'] = release.version
+        d['release']['config'] = release.config.values
+        d['release']['image'] = release.image
+        d['release']['build'] = {}
+        if release.build:
+            d['release']['build']['url'] = release.build.url
+            d['release']['build']['procfile'] = release.build.procfile
+        # add collaborators TODO: add sharing
+        d['users'] = {}
+        for u in (self.owner.username,):
+            d['users'][u] = 'admin'
+        # call a celery task to update the data bag
+        if settings.CHEF_ENABLED:
+            controller.update_application.delay(self.id, d).wait()  # @UndefinedVariable
+        return d
+
+
+class ContainerManager(models.Manager):
+
+    def scale(self, app, structure, **kwargs):
+        """Scale containers up or down to match requested."""
+        requested_containers = structure.copy()
+        formation = app.formation
+#         runtime_layers = formation.layer_set.filter(id='runtime')
+#         if len(runtime_layers) < 1:
+#             raise ScalingError('Must create a "runtime" layer to host containers')
+#         runtime_nodes = runtime_layers[0].node_set.all()
+#         if len(runtime_nodes) < 1:
+#             raise ScalingError('Must scale runtime nodes > 0 to host containers')
+        # increment new container nums off the most recent container
+        all_containers = app.container_set.all().order_by('-created')
+        container_num = 1 if not all_containers else all_containers[0].num + 1
+        # iterate and scale by container type (web, worker, etc)
+        changed = False
+        for container_type in requested_containers.keys():
+            containers = list(app.container_set.filter(type=container_type).order_by('created'))
+            requested = requested_containers.pop(container_type)
+            diff = requested - len(containers)
+            if diff == 0:
+                continue
+            changed = True
+            while diff < 0:
+                # get the next node with the most containers
+                node = Formation.objects.next_container_node(
+                    formation, container_type, reverse=True)
+                # delete a container attached to that node
+                for c in containers:
+                    if node == c.node:
+                        containers.remove(c)
+                        c.delete()
+                        diff += 1
+                        break
+            while diff > 0:
+                # get the next node with the fewest containers
+                node = Formation.objects.next_container_node(formation, container_type)
+                c = Container.objects.create(owner=app.owner,
+                                             formation=formation,
+                                             node=node,
+                                             app=app,
+                                             type=container_type,
+                                             num=container_num)
+                containers.append(c)
+                container_num += 1
+                diff -= 1
+        return changed
+#         # once nodes are in place, recalculate the formation and update the data bag
+#         databag = formation.calculate()
+#         if changed is True:
+#             formation.converge(databag)
+#         return databag
+
+    def balance(self, formation, **kwargs):
+        runtime_nodes = formation.node_set.filter(layer__id='runtime').order_by('created')
+        all_containers = self.filter(formation=formation).order_by('-created')
+        # get the next container number (e.g. web.19)
+        container_num = 1 if not all_containers else all_containers[0].num + 1
+        changed = False
+        # iterate by unique container type
+        for container_type in set([c.type for c in all_containers]):
+            # map node container counts => { 2: [b3, b4], 3: [ b1, b2 ] }
+            n_map = {}
+            for node in runtime_nodes:
+                ct = len(node.container_set.filter(type=container_type))
+                n_map.setdefault(ct, []).append(node)
+            # loop until diff between min and max is 1 or 0
+            while max(n_map.keys()) - min(n_map.keys()) > 1:
+                # get the most over-utilized node
+                n_max = max(n_map.keys())
+                n_over = n_map[n_max].pop(0)
+                if len(n_map[n_max]) == 0:
+                    del n_map[n_max]
+                # get the most under-utilized node
+                n_min = min(n_map.keys())
+                n_under = n_map[n_min].pop(0)
+                if len(n_map[n_min]) == 0:
+                    del n_map[n_min]
+                # delete the oldest container from the most over-utilized node
+                c = n_over.container_set.filter(type=container_type).order_by('created')[0]
+                app = c.app  # pull ref to app for recreating the container
+                c.delete()
+                # create a container on the most under-utilized node
+                self.create(owner=formation.owner,
+                            formation=formation,
+                            app=app,
+                            type=container_type,
+                            num=container_num,
+                            node=n_under)
+                container_num += 1
+                # update the n_map accordingly
+                for n in (n_over, n_under):
+                    ct = len(n.container_set.filter(type=container_type))
+                    n_map.setdefault(ct, []).append(n)
+                changed = True
+        return changed
+
+
+@python_2_unicode_compatible
 class Container(UuidAuditedModel):
 
     """
     Docker container used to securely host an application process.
     """
 
+    objects = ContainerManager()
+
     owner = models.ForeignKey(settings.AUTH_USER_MODEL)
     formation = models.ForeignKey('Formation')
     node = models.ForeignKey('Node')
+    app = models.ForeignKey('App')
     type = models.CharField(max_length=128)
     num = models.PositiveIntegerField()
 
@@ -719,7 +756,7 @@ class Container(UuidAuditedModel):
     class Meta:
         get_latest_by = '-created'
         ordering = ['created']
-        unique_together = (('formation', 'type', 'num'),)
+        unique_together = (('app', 'type', 'num'),)
 
 
 @python_2_unicode_compatible
@@ -731,7 +768,7 @@ class Config(UuidAuditedModel):
     """
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL)
-    formation = models.ForeignKey('Formation')
+    app = models.ForeignKey('App')
     version = models.PositiveIntegerField()
 
     values = fields.EnvVarsField(default='{}', blank=True)
@@ -739,10 +776,10 @@ class Config(UuidAuditedModel):
     class Meta:
         get_latest_by = 'created'
         ordering = ['-created']
-        unique_together = (('formation', 'version'),)
+        unique_together = (('app', 'version'),)
 
     def __str__(self):
-        return "{0}-v{1}".format(self.formation.id, self.version)
+        return "{0}-v{1}".format(self.app.id, self.version)
 
 
 @python_2_unicode_compatible
@@ -753,7 +790,7 @@ class Build(UuidAuditedModel):
     """
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL)
-    formation = models.ForeignKey('Formation')
+    app = models.ForeignKey('App')
     sha = models.CharField('SHA', max_length=255, blank=True)
     output = models.TextField(blank=True)
 
@@ -768,10 +805,10 @@ class Build(UuidAuditedModel):
     class Meta:
         get_latest_by = 'created'
         ordering = ['-created']
-        unique_together = (('formation', 'uuid'),)
+        unique_together = (('app', 'uuid'),)
 
     def __str__(self):
-        return "{0}-{1}".format(self.formation.id, self.sha)
+        return "{0}-{1}".format(self.app.id, self.sha)
 
     @classmethod
     def push(cls, push):
@@ -821,7 +858,7 @@ class Release(UuidAuditedModel):
     """
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL)
-    formation = models.ForeignKey('Formation')
+    app = models.ForeignKey('App')
     version = models.PositiveIntegerField()
 
     config = models.ForeignKey('Config')
@@ -832,10 +869,10 @@ class Release(UuidAuditedModel):
     class Meta:
         get_latest_by = 'created'
         ordering = ['-created']
-        unique_together = (('formation', 'version'),)
+        unique_together = (('app', 'version'),)
 
     def __str__(self):
-        return "{0}-v{1}".format(self.formation.id, self.version)
+        return "{0}-v{1}".format(self.app.id, self.version)
 
     def rollback(self):
         # create a rollback log entry
@@ -849,9 +886,8 @@ def new_release(sender, **kwargs):
 
     :returns: a newly created :class:`Release`
     """
-    formation, user = kwargs['formation'], kwargs['user']
-    last_release = Release.objects.filter(
-        formation=formation).order_by('-created')[0]
+    app, user = kwargs['app'], kwargs['user']
+    last_release = Release.objects.filter(app=app).order_by('-created')[0]
     image = kwargs.get('image', last_release.image)
     config = kwargs.get('config', last_release.config)
     build = kwargs.get('build', last_release.build)
@@ -866,10 +902,10 @@ def new_release(sender, **kwargs):
             new_values.update(config.values)
             config = Config.objects.create(
                 version=config.version + 1, owner=user,
-                formation=formation, values=new_values)
+                app=app, values=new_values)
     # create new release and auto-increment version
     new_version = last_release.version + 1
     release = Release.objects.create(
-        owner=user, formation=formation, image=image, config=config,
+        owner=user, app=app, image=image, config=config,
         build=build, version=new_version)
     return release
