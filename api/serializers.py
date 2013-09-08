@@ -120,7 +120,6 @@ class FormationSerializer(serializers.ModelSerializer):
     """Serialize a :class:`~api.models.Formation` model."""
 
     owner = serializers.Field(source='owner.username')
-    id = serializers.SlugField(default=utils.generate_app_name)
 
     class Meta:
         """Metadata options for a :class:`FormationSerializer`."""
