@@ -5,6 +5,7 @@ from celery import task
 
 from api.models import Formation, App
 
+
 @task(name='mock.configure')
 def configure(config, node, layer):
     config['config'] = config
@@ -18,8 +19,8 @@ def update(obj):
     return
 
 
-@task(name='mock.delete')
-def delete(obj):
+@task(name='mock.destroy')
+def destroy(obj):
     return
 
 

@@ -542,16 +542,11 @@ class Node(UuidAuditedModel):
         task = tasks.run_node.subtask(args)
         return task.apply_async().wait()
 
-#     def destroy(self, async=False):
-#         subtask = self.terminate()
-#         if async:
-#             return subtask
-#         return subtask.apply_async().wait()
-
-    def destroy(self,):
-        provider = import_provider_tasks(self.layer.flavor.provider.type)
-        cm_tasks = None
-        monitoring_tasks = None
+    def destroy(self, async=False):
+        subtask = self.terminate()
+        if async:
+            return subtask
+        return subtask.apply_async().wait()
 
 
 @python_2_unicode_compatible
@@ -888,6 +883,7 @@ def new_release(sender, **kwargs):
 # import user-defined config management module
 _CM = importlib.import_module(settings.CM_MODULE)
 
+
 @receiver(post_save)
 def update_cm(sender, instance, **kwargs):
     if instance.__class__ not in (Formation, App, Key, User):
@@ -896,7 +892,7 @@ def update_cm(sender, instance, **kwargs):
 
 
 @receiver(post_delete)
-def delete_cm(sender, instance, **kwargs):
+def destroy_cm(sender, instance, **kwargs):
     if instance.__class__ not in (Formation, App, Key, User):
         return
-    _CM.delete.delay(instance).wait()
+    _CM.destroy.delay(instance).wait()

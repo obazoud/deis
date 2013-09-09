@@ -269,8 +269,8 @@ class FormationLayerViewSet(OwnerViewSet):
             request.DATA['ssh_public_key'] = key.exportKey('OpenSSH')
         try:
             return OwnerViewSet.create(self, request, **kwargs)
-        except IntegrityError:
-            return Response("Layer with this Id already exists.",
+        except IntegrityError as e:
+            return Response("Layer with this Id already exists. {}".format(e),
                             status=HTTP_400_BAD_REQUEST)
 
     def post_save(self, layer, created=False, **kwargs):

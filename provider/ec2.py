@@ -1,6 +1,5 @@
 
 from __future__ import unicode_literals
-import json
 import time
 
 from boto import ec2
@@ -12,7 +11,6 @@ from . import util
 from api.models import Flavor
 from api.models import Node
 from deis import settings
-from cm.chef_api import ChefAPI
 
 
 @task(name='ec2.build_layer')
@@ -97,6 +95,7 @@ def launch_node(node_id, creds, params, init, ssh_username, ssh_private_key):
         initializing, _rc = util.exec_ssh(
             ssh, 'ps auxw | egrep "cloud-init" | grep -v egrep')
 
+
 @task(name='ec2.terminate_node')
 def terminate_node(node_id, creds, params, provider_id):
     region = params.get('region', 'us-east-1')
@@ -109,16 +108,6 @@ def terminate_node(node_id, creds, params, provider_id):
             i.update()
             if i.state == "terminated":
                 break
-    # delete the node from the database
-    node = Node.objects.get(uuid=node_id)
-    chef_id = node.id
-    node.delete()
-    # purge the node & client records from chef server
-    client = ChefAPI(settings.CHEF_SERVER_URL,
-                     settings.CHEF_CLIENT_NAME,
-                     settings.CHEF_CLIENT_KEY)
-    client.delete_node(chef_id)
-    client.delete_client(chef_id)
 
 
 @task(name='ec2.converge_node')

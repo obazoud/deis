@@ -51,17 +51,25 @@ except Exception as e:
     print 'Error: failed to auto-configure Chef -- {}'.format(e)
 
 
-@task(name='chef.update')
+@task
 def update(instance):
     # create databag item if it doesn't exist
     # update databag item
     return
 
-@task(name='chef.delete')
-def delete(instance):
+
+@task
+def destroy(instance):
+    # purge the node & client records from chef server
+    client = ChefAPI(CHEF_SERVER_URL,
+                     CHEF_CLIENT_NAME,
+                     CHEF_CLIENT_KEY)
+    client.delete_node(instance.id)
+    client.delete_client(instance.id)
     return
 
-@task(name='chef.converge'):
+
+@task
 def converge(instance=None):
     return
 

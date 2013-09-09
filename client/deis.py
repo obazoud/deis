@@ -504,7 +504,7 @@ class DeisClient(object):
             print()
             self.providers_discover({})
             print()
-            print('Use `deis create --flavor=ec2-us-east-1` to create a new formation')
+            print('Use `deis init dev ec2-us-east-1` to create a new formation')
         else:
             print('Registration failed', response.content)
             return False
@@ -1460,7 +1460,7 @@ class DeisClient(object):
         if response.status_code == requests.codes.ok:  # @UndefinedVariable
             body = response.json()
             ssh_args = ['-o UserKnownHostsFile=/dev/null', '-o StrictHostKeyChecking=no',
-                        'ubuntu@{fqdn}'.format(**body) ]
+                        'ubuntu@{fqdn}'.format(**body)]
             command = args.get('<command>')
             if command:
                 ssh_args.extend(command)
