@@ -96,7 +96,7 @@ class LayerAdmin(admin.ModelAdmin):
     in the Django admin.
     """
     date_hierarchy = 'created'
-    list_display = ('id', 'owner', 'formation', 'flavor', 'proxy', 'runtime', 'run_list')
+    list_display = ('id', 'owner', 'formation', 'flavor', 'proxy', 'runtime', 'config')
     list_filter = ('owner', 'formation', 'flavor')
 admin.site.register(Layer, LayerAdmin)
 

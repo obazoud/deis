@@ -12,7 +12,7 @@ from . import util
 from api.models import Flavor
 from api.models import Node
 from deis import settings
-from celerytasks.chef import ChefAPI
+from cm.chef_api import ChefAPI
 
 
 @task(name='ec2.build_layer')
@@ -96,25 +96,6 @@ def launch_node(node_id, creds, params, init, ssh_username, ssh_private_key):
         time.sleep(10)
         initializing, _rc = util.exec_ssh(
             ssh, 'ps auxw | egrep "cloud-init" | grep -v egrep')
-    # loop until node is registered with chef
-    # if chef bootstrapping fails, the node will not complete registration
-    if settings.CHEF_ENABLED:
-        registered = False
-        while not registered:
-            # reinstatiate the client on each poll attempt
-            # to avoid disconnect errors
-            client = ChefAPI(settings.CHEF_SERVER_URL,
-                             settings.CHEF_CLIENT_NAME,
-                             settings.CHEF_CLIENT_KEY)
-            resp, status = client.get_node(node.id)
-            if status == 200:
-                body = json.loads(resp)
-                # wait until idletime is not null
-                # meaning the node is registered
-                if body.get('automatic', {}).get('idletime'):
-                    break
-            time.sleep(5)
-
 
 @task(name='ec2.terminate_node')
 def terminate_node(node_id, creds, params, provider_id):

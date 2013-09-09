@@ -152,8 +152,9 @@ INSTALLED_APPS = (
     'south',
     # Deis apps
     'api',
-    'celerytasks',
     'client',
+    'cm',
+    'provider',
     'web',
 )
 
@@ -245,13 +246,15 @@ LOGGING = {
 }
 
 # import deis-specific settings files
-from .chef_settings import *  # @UnusedWildImport # noqa
 from .celery_settings import *  # @UnusedWildImport # noqa
 
 # default deis settings
 CONVERGE_ON_PUSH = True
 DEIS_LOG_DIR = os.path.abspath(os.path.join(__file__, '..', '..', 'logs'))
 LOG_LINES = 1000
+
+# the config management module to use in api.models
+CM_MODULE = 'cm.mock'
 
 # Create a file named "local_settings.py" to contain sensitive settings data
 # such as database configuration, admin email, or passwords and keys. It

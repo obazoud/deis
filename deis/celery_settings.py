@@ -10,8 +10,8 @@ CELERY_ALWAYS_EAGER = False
 EAGER_PROPAGATES_EXCEPTION = True
 
 # make sure we import the task modules
-CELERY_IMPORTS = ("celerytasks.ec2",
-                  "celerytasks.controller",
-                  "celerytasks.mock")
+CELERY_IMPORTS = ("provider.ec2",
+                  "provider.controller",
+                  "provider.mock")
 
 djcelery.setup_loader()

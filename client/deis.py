@@ -880,13 +880,10 @@ class DeisClient(object):
         Valid commands for formations:
 
         formations:create        create a new container formation
+        formations:scale         scale node types by layer (deis=2, layer2=1)
         formations:info          print a represenation of the formation
-        formations:scale         scale container types (web=2, worker=1)
-        formations:balance       rebalance the container formation
         formations:converge      force-converge all nodes in the formation
         formations:calculate     recalculate and update the formation databag
-        formations:logs          view aggregated log info for the formation
-        formations:run           run a command on a remote container
         formations:destroy       destroy a container formation
 
         Use `deis help [command]` to learn more
@@ -1373,20 +1370,8 @@ class DeisClient(object):
         """
         Destroy a node by ID
 
-        Nodes should normally be added/removed using a layers:scale
-        command.  In the event you need to destroy a specific node,
-        this command will terminate it at the cloud provider and
-        purge it from the Chef server.
-
-        Warning: Destroying a node will orphans any containers
-        associated with it.  Use `formations:balance` to rebalance
-        containers after destroying node(s) with this command.
-
         Usage: deis nodes:destroy <id>
         """
-        formation = args.get('--formation')
-        if not formation:
-            formation = self._session.formation
         node = args['<id>']
         sys.stdout.write("Destroying {}... ".format(node))
         sys.stdout.flush()
@@ -1395,14 +1380,14 @@ class DeisClient(object):
             progress.start()
             before = time.time()
             response = self._dispatch(
-                'delete', "/api/formations/{formation}/nodes/{node}".format(**locals()))
+                'delete', "/api/nodes/{node}".format(**locals()))
         finally:
             progress.cancel()
             progress.join()
         if response.status_code == requests.codes.no_content:  # @UndefinedVariable
             print('done in {}s\n'.format(int(time.time() - before)))
         else:
-            print('Error!', response.status_code, response.text)
+            raise ResponseError(response)
 
     def nodes_scale(self, args):
         """
@@ -1423,7 +1408,6 @@ class DeisClient(object):
             progress = TextProgress()
             progress.start()
             before = time.time()
-            # TODO: add threaded spinner to print dots
             response = self._dispatch('post',
                                       "/api/formations/{}/scale".format(formation),
                                       json.dumps(body))
@@ -1463,6 +1447,26 @@ class DeisClient(object):
             args.update({'<formation>': formation})
             return self.nodes_scale(args)
         return self.containers_scale(args)
+
+    def ssh(self, args):
+        """
+        SSH into a node
+
+        Usage: deis ssh <node> [<command>...]
+        """
+        node = args.get('<node>')
+        response = self._dispatch('get',
+                                  "/api/nodes/{node}".format(**locals()))
+        if response.status_code == requests.codes.ok:  # @UndefinedVariable
+            body = response.json()
+            ssh_args = ['-o UserKnownHostsFile=/dev/null', '-o StrictHostKeyChecking=no',
+                        'ubuntu@{fqdn}'.format(**body) ]
+            command = args.get('<command>')
+            if command:
+                ssh_args.extend(command)
+            os.execvp('ssh', ssh_args)
+        else:
+            raise ResponseError(response)
 
     def open(self, args):
         """
@@ -1690,11 +1694,11 @@ def main():
                 return
         docopt(__doc__, argv=['--help'])
     # re-parse docopt with the relevant docstring
-    # unless cmd is formations_run, which needs to use sys.argv directly
-    if not cmd == 'formations_run' and cmd in dir(cli):
-        docstring = trim(getattr(cli, cmd).__doc__)
-        if 'Usage: ' in docstring:
-            args.update(docopt(docstring))
+    # unless cmd needs to use sys.argv directly
+    # if cmd not in ('formations_run', 'ssh'):
+    docstring = trim(getattr(cli, cmd).__doc__)
+    if 'Usage: ' in docstring:
+        args.update(docopt(docstring))
     # find the method for dispatching
     if hasattr(cli, cmd):
         method = getattr(cli, cmd)

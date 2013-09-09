@@ -17,31 +17,18 @@ from celery.canvas import group
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import models
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.dispatch.dispatcher import Signal
 from django.utils.encoding import python_2_unicode_compatible
 
 from api import fields
-from celerytasks import controller
+from provider import import_provider_tasks
 
 
 # define custom signals
 scale_signal = Signal(providing_args=['formation', 'user'])
 release_signal = Signal(providing_args=['formation', 'user'])
-
-
-def import_tasks(provider_type):
-    """Return the celerytasks module for a provider.
-
-    :param string provider_type: type of cloud provider **currently only "ec2"**
-    :rtype: celerytasks module for the provider
-    :raises: :py:class:`ImportError` if the provider isn't recognized
-    """
-    try:
-        tasks = importlib.import_module('celerytasks.' + provider_type)
-    except ImportError as e:
-        raise e
-    return tasks
 
 
 class AuditedModel(models.Model):
@@ -239,9 +226,9 @@ class FormationManager(models.Manager):
             owner_keys = ["{0}_{1}".format(
                 k.owner.username, k.id) for k in formation.owner.key_set.all()]
             keys.extend(owner_keys)
-        # call a celery task to update gitosis
-        if settings.CHEF_ENABLED:
-            controller.update_gitosis.delay(databag).wait()  # @UndefinedVariable
+#         # call a celery task to update gitosis
+#         if settings.CHEF_ENABLED:
+#             controller.update_gitosis.delay(databag).wait()  # @UndefinedVariable
 
     def next_container_node(self, formation, container_type, reverse=False):
         count = []
@@ -318,15 +305,15 @@ class Formation(UuidAuditedModel):
         d['nodes'] = {}
         for n in self.node_set.all():
             d['nodes'].setdefault(n.layer.id, {})[n.id] = n.fqdn
-        # call a celery task to update the formation data bag
-        if settings.CHEF_ENABLED:
-            controller.update_formation.delay(self.id, d).wait()  # @UndefinedVariable
+#         # call a celery task to update the formation data bag
+#         if settings.CHEF_ENABLED:
+#             controller.update_formation.delay(self.id, d).wait()  # @UndefinedVariable
         return d
 
     def converge(self, databag):
         """Call a celery task to update the formation data bag."""
-        if settings.CHEF_ENABLED:
-            controller.update_formation.delay(self.id, databag).wait()  # @UndefinedVariable
+#         if settings.CHEF_ENABLED:
+#             controller.update_formation.delay(self.id, databag).wait()  # @UndefinedVariable
         # TODO: batch node converging by layer.level
         nodes = [node for node in self.node_set.all()]
         job = group(*[n.converge() for n in nodes])
@@ -344,9 +331,9 @@ class Formation(UuidAuditedModel):
         group(node_tasks).apply_async().join()
         # kill all the layers in parallel
         group(layer_tasks).apply_async().join()
-        # call a celery task to update the formation data bag
-        if settings.CHEF_ENABLED:
-            controller.destroy_formation.delay(self.id).wait()  # @UndefinedVariable
+#         # call a celery task to update the formation data bag
+#         if settings.CHEF_ENABLED:
+#             controller.destroy_formation.delay(self.id).wait()  # @UndefinedVariable
 
 
 @python_2_unicode_compatible
@@ -367,15 +354,13 @@ class Layer(UuidAuditedModel):
     proxy = models.BooleanField(default=False)
     runtime = models.BooleanField(default=False)
 
-    # chef settings
-    chef_version = models.CharField(max_length=32, default='11.4.4')
-    run_list = models.CharField(max_length=512)
-    initial_attributes = fields.JSONField(default='{}', blank=True)
-    environment = models.CharField(max_length=64, default='_default')
     # ssh settings
     ssh_username = models.CharField(max_length=64, default='ubuntu')
     ssh_private_key = models.TextField()
     ssh_public_key = models.TextField()
+
+    # example: {'run_list': [deis::runtime'], 'environment': 'dev'}
+    config = fields.JSONField(default='{}', blank=True)
 
     class Meta:
         unique_together = (('formation', 'id'),)
@@ -384,14 +369,14 @@ class Layer(UuidAuditedModel):
         return self.id
 
     def build(self, *args, **kwargs):
-        tasks = import_tasks(self.flavor.provider.type)
+        tasks = import_provider_tasks(self.flavor.provider.type)
         name = "{0}-{1}".format(self.formation.id, self.id)
         args = (name, self.flavor.provider.creds.copy(),
                 self.flavor.params.copy())
         return tasks.build_layer.delay(*args).wait()
 
     def destroy(self, async=False):
-        tasks = import_tasks(self.flavor.provider.type)
+        tasks = import_provider_tasks(self.flavor.provider.type)
         # create subtasks to terminate all nodes in parallel
         node_tasks = [node.destroy(async=True) for node in self.node_set.all()]
         # purge other hosting provider infrastructure
@@ -493,7 +478,7 @@ class Node(UuidAuditedModel):
         return self.id
 
     def launch(self, *args, **kwargs):
-        tasks = import_tasks(self.layer.flavor.provider.type)
+        tasks = import_provider_tasks(self.layer.flavor.provider.type)
         args = self._prepare_launch_args()
         return tasks.launch_node.subtask(args)
 
@@ -502,22 +487,8 @@ class Node(UuidAuditedModel):
         params = self.layer.flavor.params.copy()
         params['layer'] = "{0}-{1}".format(self.formation.id, self.layer.id)
         params['id'] = self.id
-        init = self.layer.flavor.init.copy()
-        if settings.CHEF_ENABLED:
-            chef = init['chef'] = {}
-            chef['ruby_version'] = settings.CHEF_RUBY_VERSION
-            chef['server_url'] = settings.CHEF_SERVER_URL
-            chef['install_type'] = settings.CHEF_INSTALL_TYPE
-            chef['environment'] = settings.CHEF_ENVIRONMENT
-            chef['validation_name'] = settings.CHEF_VALIDATION_NAME
-            chef['validation_key'] = settings.CHEF_VALIDATION_KEY
-            chef['node_name'] = self.id
-            if self.layer.chef_version:
-                chef['version'] = self.layer.chef_version
-            if self.layer.run_list:
-                chef['run_list'] = self.layer.run_list.split(',')
-            if self.layer.initial_attributes:
-                chef['initial_attributes'] = self.layer.initial_attributes
+        base_init = self.layer.flavor.init.copy()
+        init = _CM.configure(base_init, self, self.layer)
         # add the formation's ssh pubkey
         init.setdefault(
             'ssh_authorized_keys', []).append(self.layer.ssh_public_key)
@@ -529,7 +500,7 @@ class Node(UuidAuditedModel):
         return args
 
     def converge(self, *args, **kwargs):
-        tasks = import_tasks(self.layer.flavor.provider.type)
+        tasks = import_provider_tasks(self.layer.flavor.provider.type)
         args = self._prepare_converge_args()
         # TODO: figure out how to store task return values in model
         return tasks.converge_node.subtask(args)
@@ -542,7 +513,7 @@ class Node(UuidAuditedModel):
         return args
 
     def terminate(self, *args, **kwargs):
-        tasks = import_tasks(self.layer.flavor.provider.type)
+        tasks = import_provider_tasks(self.layer.flavor.provider.type)
         args = self._prepare_terminate_args()
         # TODO: figure out how to store task return values in model
         return tasks.terminate_node.subtask(args)
@@ -554,7 +525,7 @@ class Node(UuidAuditedModel):
         return args
 
     def run(self, app, *args, **kwargs):
-        tasks = import_tasks(self.layer.flavor.provider.type)
+        tasks = import_provider_tasks(self.layer.flavor.provider.type)
         command = ' '.join(*args)
         # prepare app-specific docker arguments
         app_id = app.id
@@ -571,11 +542,16 @@ class Node(UuidAuditedModel):
         task = tasks.run_node.subtask(args)
         return task.apply_async().wait()
 
-    def destroy(self, async=False):
-        subtask = self.terminate()
-        if async:
-            return subtask
-        return subtask.apply_async().wait()
+#     def destroy(self, async=False):
+#         subtask = self.terminate()
+#         if async:
+#             return subtask
+#         return subtask.apply_async().wait()
+
+    def destroy(self,):
+        provider = import_provider_tasks(self.layer.flavor.provider.type)
+        cm_tasks = None
+        monitoring_tasks = None
 
 
 @python_2_unicode_compatible
@@ -626,9 +602,9 @@ class App(UuidAuditedModel):
         d['users'] = {}
         for u in (self.owner.username,):
             d['users'][u] = 'admin'
-        # call a celery task to update the data bag
-        if settings.CHEF_ENABLED:
-            controller.update_application.delay(self.id, d).wait()  # @UndefinedVariable
+#         # call a celery task to update the data bag
+#         if settings.CHEF_ENABLED:
+#             controller.update_application.delay(self.id, d).wait()  # @UndefinedVariable
         return d
 
 
@@ -907,3 +883,20 @@ def new_release(sender, **kwargs):
         owner=user, app=app, image=image, config=config,
         build=build, version=new_version)
     return release
+
+# now that we've defined models that may be imported by celery tasks
+# import user-defined config management module
+_CM = importlib.import_module(settings.CM_MODULE)
+
+@receiver(post_save)
+def update_cm(sender, instance, **kwargs):
+    if instance.__class__ not in (Formation, App, Key, User):
+        return
+    _CM.update.delay(instance).wait()
+
+
+@receiver(post_delete)
+def delete_cm(sender, instance, **kwargs):
+    if instance.__class__ not in (Formation, App, Key, User):
+        return
+    _CM.delete.delay(instance).wait()

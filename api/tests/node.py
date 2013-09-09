@@ -50,7 +50,7 @@ class NodeTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['results']), 0)
         # scale up
-        url = '/api/formations/{formation_id}/scale/layers'.format(**locals())
+        url = '/api/formations/{formation_id}/scale'.format(**locals())
         body = {'runtime': 1}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 200)
@@ -60,6 +60,15 @@ class NodeTest(TestCase):
         self.assertEqual(len(response.data['results']), 1)
         node = response.data['results'][0]['id']
         url = '/api/formations/{formation_id}/nodes/{node}'.format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        # query alternate nodes endpoints
+        url = '/api/nodes'.format(**locals())
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        node = response.data['results'][0]['id']
+        url = '/api/nodes/{node}'.format(**locals())
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertIn('fqdn', response.data)
@@ -158,7 +167,7 @@ class NodeTest(TestCase):
         body = {'id': 'runtime', 'flavor': 'autotest', 'run_list': 'recipe[deis::runtime]'}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
-        url = '/api/formations/{formation_id}/scale/layers'.format(**locals())
+        url = '/api/formations/{formation_id}/scale'.format(**locals())
         body = {'runtime': 1}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 400)

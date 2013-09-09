@@ -310,6 +310,13 @@ class FormationNodeViewSet(OwnerViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class NodeViewSet(FormationNodeViewSet):
+    """RESTful views for :class:`~api.models.Node`."""
+
+    def get_queryset(self, **kwargs):
+        return self.model.objects.filter(owner=self.request.user)
+
+
 class AppViewSet(OwnerViewSet):
     """RESTful views for :class:`~api.models.App`."""
 

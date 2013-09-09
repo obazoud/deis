@@ -4,7 +4,7 @@ import subprocess
 
 from celery import task
 
-from celerytasks.chef import ChefAPI
+from cm.chef_api import ChefAPI
 from deis import settings
 
 

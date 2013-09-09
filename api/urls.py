@@ -315,6 +315,12 @@ urlpatterns = patterns(
         views.AppViewSet.as_view({'get': 'retrieve', 'delete': 'destroy'})),
     url(r'^apps/?',
         views.AppViewSet.as_view({'post': 'create', 'get': 'list'})),
+    # nodes
+    url(r'^nodes/(?P<node>[a-z0-9-]+)/?',
+        views.NodeViewSet.as_view({
+            'get': 'retrieve', 'delete': 'destroy'})),
+    url(r'^nodes/?',
+        views.NodeViewSet.as_view({'get': 'list'})),
     # authn / authz
     url(r'^auth/register/?',
         views.UserRegistrationView.as_view({'post': 'create'})),

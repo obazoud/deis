@@ -43,16 +43,17 @@ class LayerTest(TestCase):
         formation_id = response.data['id']  # noqa
         url = '/api/formations/{formation_id}/layers'.format(**locals())
         body = {'id': 'autotest', 'flavor': 'autotest',
-                'run_list': 'recipe[deis::test1],recipe[deis::test2]'}
+                'config': json.dumps({'key': 'value'})}
         response = self.client.post(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 201)
         layer_id = response.data['id']
         self.assertIn('owner', response.data)
         self.assertIn('id', response.data)
         self.assertIn('flavor', response.data)
-        self.assertIn('run_list', response.data)
         self.assertIn('proxy', response.data)
         self.assertIn('runtime', response.data)
+        self.assertIn('config', response.data)
+        self.assertIn('key', json.loads(response.data['config']))
         url = '/api/formations/{formation_id}/layers'.format(**locals())
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -61,10 +62,10 @@ class LayerTest(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], layer_id)
-        body = {'run_list': 'new'}
+        body = {'config': {'new': 'value'}}
         response = self.client.patch(url, json.dumps(body), content_type='application/json')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['run_list'], 'new')
+        self.assertIn('new', response.data['config'])
         response = self.client.delete(url)
         self.assertEqual(response.status_code, 204)
 
